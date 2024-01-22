@@ -1,8 +1,11 @@
 #define VULKAN_HPP_DISPATCH_LOADER_DYNAMIC  1
-#include <vulkan/vulkan.hpp>
+#include "vulkan/vulkan.hpp"
 #include <iostream>
+#include <chrono>
+#if _WIN32
 #include <profileapi.h>
 #include <synchapi.h>
+#endif
 #include <emmintrin.h>
 #include <smmintrin.h>
 #include <immintrin.h>
@@ -35,12 +38,12 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback( VkDebugUtilsMessageS
       {
         // Validation Warning: vkCreateInstance(): to enable extension VK_EXT_debug_utils, but this extension is intended to support use by applications when
         // debugging and it is strongly recommended that it be otherwise avoided.
-        return vk::False;
+        return VK_FALSE;
       }
       else if ( static_cast<uint32_t>(pCallbackData->messageIdNumber) == 0xe8d1a9fe )
       {
         // Validation Performance Warning: Using debug builds of the validation layers *will* adversely affect performance.
-        return vk::False;
+        return VK_FALSE;
       }
 #endif
 
@@ -80,19 +83,23 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debugUtilsMessengerCallback( VkDebugUtilsMessageS
           }
         }
       }
-      return vk::False;
+      return VK_FALSE;
     }
 
 int main() {
-    VULKAN_HPP_DEFAULT_DISPATCHER.init();
+    vk::DynamicLoader dl;
+    PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = dl.getProcAddress<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr");
+    VULKAN_HPP_DEFAULT_DISPATCHER.init(vkGetInstanceProcAddr);
 
     vk::ApplicationInfo appInfo { "CopyBenches Demo", 1, "none", 1, VK_API_VERSION_1_2};
     vk::InstanceCreateInfo instanceInfo { {}, &appInfo };
 
     const char* enabledInstLayers[] = { "VK_LAYER_KHRONOS_validation"};
     const char* enabledInstExts[] = { VK_EXT_DEBUG_UTILS_EXTENSION_NAME  };
-    instanceInfo.setPEnabledLayerNames(enabledInstLayers);
-    instanceInfo.setPEnabledExtensionNames(enabledInstExts);
+    instanceInfo.setPpEnabledLayerNames(&enabledInstLayers[0]);
+    instanceInfo.setEnabledLayerCount(sizeof(enabledInstLayers)/sizeof(enabledInstLayers[0]));
+    instanceInfo.setPpEnabledExtensionNames(enabledInstExts);
+    instanceInfo.setEnabledExtensionCount(sizeof(enabledInstExts)/sizeof(enabledInstExts[0]));
 
     auto instance = vk::createInstanceUnique(instanceInfo);
     VULKAN_HPP_DEFAULT_DISPATCHER.init( *instance );
@@ -118,9 +125,9 @@ int main() {
     // create a Device
     float                     queuePriority = 0.0f;
     vk::DeviceQueueCreateInfo deviceQueueCreateInfo( vk::DeviceQueueCreateFlags(), static_cast<uint32_t>( dmaQueueFamilyIndex ), 1, &queuePriority );
-    vk::StructureChain<vk::DeviceCreateInfo, vk::PhysicalDeviceHostQueryResetFeatures> devCreateInfo(vk::DeviceCreateInfo(vk::DeviceCreateFlags(), deviceQueueCreateInfo), {true});
+    vk::StructureChain<vk::DeviceCreateInfo, vk::PhysicalDeviceHostQueryResetFeatures> devCreateInfo(vk::DeviceCreateInfo(vk::DeviceCreateFlags(), 1, &deviceQueueCreateInfo), {true});
 
-    auto device = physicalDevice.createDeviceUnique(devCreateInfo.get());
+    auto device = physicalDevice.createDeviceUnique(devCreateInfo.get<const vk::DeviceCreateInfo&>());
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
 
     // create to/from memory
@@ -179,7 +186,8 @@ int main() {
     
     commandBuffer->end();
 
-    dmaQueue.submit( vk::SubmitInfo( {}, {}, *commandBuffer ), *dmaFence );
+    vk::PipelineStageFlags nullFlags {};
+    dmaQueue.submit( vk::SubmitInfo( 0, nullptr,  &nullFlags, 1, &*commandBuffer ), *dmaFence );
     dmaQueue.waitIdle();
 
     while ( device->waitForFences( *dmaFence, true, 1'000'000 ) == vk::Result::eTimeout )
@@ -206,10 +214,8 @@ int main() {
 
     copyCount = 50;
 
-    LARGE_INTEGER start, end, freq;
     assert((copySize % ((128/8)* 8)) == 0 );
-    bool res = QueryPerformanceCounter(&start);
-    assert(res);
+    const auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < copyCount; i++) {
 #if 1
       __m256i* pCurSrc = (__m256i*)pSrcMem;
@@ -237,13 +243,11 @@ int main() {
       memcpy(pDstMem, pSrcMem, copySize);
 #endif
     }
-    res = QueryPerformanceCounter(&end);
-    assert(res);
-    res = QueryPerformanceFrequency(&freq);
-    assert(res);
-    elapsedTime = (end.QuadPart - start.QuadPart);
+    const auto end = std::chrono::high_resolution_clock::now();
 
-    elapsedMs = ((double)(end.QuadPart - start.QuadPart))/freq.QuadPart*1000;
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    elapsedMs = elapsed.count();
+
     copySizeMB = (copySize/(1*1024*1024)) * copyCount;
     rateMBps = (copySizeMB/elapsedMs)*1000;
 
