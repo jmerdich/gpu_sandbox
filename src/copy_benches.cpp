@@ -127,7 +127,7 @@ int main() {
     vk::DeviceQueueCreateInfo deviceQueueCreateInfo( vk::DeviceQueueCreateFlags(), static_cast<uint32_t>( dmaQueueFamilyIndex ), 1, &queuePriority );
     vk::StructureChain<vk::DeviceCreateInfo, vk::PhysicalDeviceHostQueryResetFeatures> devCreateInfo(vk::DeviceCreateInfo(vk::DeviceCreateFlags(), 1, &deviceQueueCreateInfo), {true});
 
-    auto device = physicalDevice.createDeviceUnique(devCreateInfo.get<const vk::DeviceCreateInfo&>());
+    auto device = physicalDevice.createDeviceUnique(devCreateInfo.get<vk::DeviceCreateInfo>());
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
 
     // create to/from memory
